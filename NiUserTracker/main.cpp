@@ -28,6 +28,13 @@
 #include <XnCppWrapper.h>
 #include "SceneDrawer.h"
 #include <XnPropNames.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
 
 //---------------------------------------------------------------------------
 // Globals
@@ -489,6 +496,16 @@ void glInit (int * pargc, char ** argv)
 		return nRetVal;												\
 	}
 
+struct sockaddr_in addr;
+struct hostent *hostent;
+char *hostname = "localhost";
+int fd;
+int sockopt = 1;
+fd_set readfds;
+struct timeval timeout;
+float v[4];
+int i, len;
+
 int main(int argc, char **argv)
 {
 	XnStatus nRetVal = XN_STATUS_OK;
@@ -521,6 +538,38 @@ int main(int argc, char **argv)
 			return (nRetVal);
 		}
 	}
+
+	/* start */
+	if ((fd = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
+		perror("socket error");
+		return 1;
+	}
+
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt)) == -1) {
+		perror("setsockopt error");
+		close(fd);
+		return 1;
+	}
+
+	if ((hostent = gethostbyname(hostname)) == NULL) {
+		perror("gethostbyname error");
+		close(fd);
+		return 1;
+	}
+
+	addr.sin_addr.s_addr = ((struct in_addr *)(hostent->h_addr))->s_addr;
+	addr.sin_family = PF_INET;
+	addr.sin_port = htons(12345);
+
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+		perror("connect error");
+		close(fd);
+		return 1;
+	}
+
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 500;
+	/* end*/
 
 	nRetVal = g_Context.FindExistingNode(XN_NODE_TYPE_DEPTH, g_DepthGenerator);
 	if (nRetVal != XN_STATUS_OK)

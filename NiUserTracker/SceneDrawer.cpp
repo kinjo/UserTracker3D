@@ -49,6 +49,11 @@ extern XnBool g_bPrintState;
 extern XnBool g_bPrintFrameID;
 extern XnBool g_bMarkJoints;
 
+extern fd_set readfds;
+extern int fd;
+char wbuf[256];
+extern struct timeval timeout;
+
 #include <map>
 std::map<XnUInt32, std::pair<XnCalibrationStatus, XnPoseDetectionStatus> > m_Errors;
 void XN_CALLBACK_TYPE MyCalibrationInProgress(xn::SkeletonCapability& /*capability*/, XnUserID id, XnCalibrationStatus calibrationError, void* /*pCookie*/)
@@ -225,6 +230,21 @@ void glPrintString(void *font, char *str)
 	}
 }
 #endif
+float normm(float vec[]) {
+	return sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+}
+float innert_product(float vec0[], float vec1[]) {
+	return vec0[0] * vec1[0] + vec0[1] * vec1[1] + vec0[2] * vec1[2];
+}
+void product(float vec[], float vec0[], float vec1[]) {
+	vec[0] = vec0[0] * vec1[0];
+	vec[1] = vec0[1] * vec1[1];
+	vec[2] = vec0[2] * vec1[2];
+}
+float to_deg(float r) {
+	return r * 180.0 / (atan(1.0) * 4.0);
+}
+#define CMD_UPDATEVEC 1
 bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 {
 	if (!g_UserGenerator.GetSkeletonCap().IsTracking(player))
@@ -251,6 +271,109 @@ bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 	XnPoint3D pt[2];
 	pt[0] = joint1.position;
 	pt[1] = joint2.position;
+
+	if (eJoint2 == XN_SKEL_RIGHT_HAND) {
+		if (fd) {
+			XnSkeletonJointPosition head_joint_pos;
+			g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(player, XN_SKEL_HEAD, head_joint_pos);
+			XnPoint3D hand_pos = head_joint_pos.position;
+
+			XnSkeletonJointPosition left_elbow_joint_pos;
+			g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(player,
+				XN_SKEL_LEFT_ELBOW,
+				left_elbow_joint_pos);
+			XnPoint3D left_elbow_pos = left_elbow_joint_pos.position;
+
+			XnSkeletonJointPosition left_hand_joint_pos;
+			g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(player,
+				XN_SKEL_LEFT_HAND,
+				left_hand_joint_pos);
+			XnPoint3D left_hand_pos = left_hand_joint_pos.position;
+
+			FD_ZERO(&readfds);
+			FD_SET(fd, &readfds);
+			select(32, &readfds, NULL, NULL, &timeout);
+
+			float v[16];
+			int len, i;
+			if (FD_ISSET(fd, &readfds)) {
+				for (i = 0; i < sizeof(v); i += len) {
+					len = read(fd, (char *)v + i, sizeof(v) - i);
+					if (len == -1) {
+						perror("read error");
+						close(fd);
+						fd = 0;
+					}
+				}
+
+				// pt[1] is a coordinate for the right hand
+				v[0] = pt[1].X;
+				v[1] = pt[1].Y;
+				v[2] = pt[1].Z;
+				v[3] = 1.0f;
+
+				// get a vector to right hand from head
+				{
+					// head -> right hand vector
+					float vec0[] = {
+						pt[1].X - hand_pos.X,
+						pt[1].Y - hand_pos.Y,
+						pt[1].Z - hand_pos.Z
+					};
+					// base vector
+					float vec1[] = {0, 0, -1};
+					float f[] = {1, 0, 1}, fvec0[3], fvec1[3];
+
+					product(fvec0, vec0, f);
+					product(fvec1, vec1, f);
+
+					float direction = acos(innert_product(fvec0, fvec1) / (normm(fvec0) * normm(fvec1)));
+					direction *= vec0[0] < 0 ? -1 : 1;
+					direction = direction < 0 ? 2 * M_PI + direction : direction;
+					// get direction and set to sending vector
+					v[4] = direction;
+					v[5] = 0;
+					v[6] = 0;
+					v[7] = 0;
+				}
+
+				// set left hand coordinate (unused)
+				{
+					v[8] = left_hand_pos.X;
+					v[9] = left_hand_pos.Y;
+					v[10] = left_hand_pos.Z;
+					v[11] = 1.0f;
+				}
+
+				// unused
+				{
+					v[12] = 0.0f;
+					v[13] = 0.0f;
+					v[14] = 0.0f;
+					v[15] = 0.0f;
+				}
+
+				// ntoh
+				for (i = 0; i < sizeof(v) / sizeof(float); i++) 
+					*(uint32_t *)&v[i] = ntohl(*((uint32_t *)v + i));
+
+				// set a command to update vector in distribution server
+				i = CMD_UPDATEVEC;
+				i = htonl(i);
+
+				// set buffer
+				memcpy(wbuf, &i, sizeof(i));
+				memcpy(wbuf + sizeof(i), v, sizeof(v));
+
+				// write
+				if (write(fd, wbuf, sizeof(i) + sizeof(v)) == -1) {
+					perror("write error");
+					close(fd);
+					fd = 0;
+				}
+			}
+		}
+	}
 
 	g_DepthGenerator.ConvertRealWorldToProjective(2, pt, pt);
 #define ADJUST_LIMB_Z_RATIO 2.0f
