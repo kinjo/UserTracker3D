@@ -217,15 +217,14 @@ void glutDisplay (void)
 	xn::DepthMetaData depthMD;
 	g_DepthGenerator.GetMetaData(depthMD);
 #ifndef USE_GLES
-	gluPerspective(30.0, (float)depthMD.XRes()/(float)depthMD.YRes(), 1.0, 1000.0);
+	gluPerspective(30.0, (float)depthMD.XRes()/(float)depthMD.YRes(), 1.0, 5000.0);
 
-	glViewport( 0, 0, depthMD.XRes(), depthMD.YRes() );
+	glViewport( 0, 0, GL_WIN_SIZE_X, GL_WIN_SIZE_Y );
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	gluLookAt( 
-		0, 0, -20,
-		//0, 0, -500,
+		0, 0, -1000,
 		0, 0, 0,
 		0, -1, 0
 	);
@@ -318,7 +317,7 @@ const GLchar *vertSrc[] = {
 	"void main(void) {",
 	"    vec3 v = position;",
 	"    original = position;",
-	"    v.z -= 7.0;",
+	"    v.z -= 400.0;",
 	"    gl_Position = gl_ModelViewProjectionMatrix * vec4(v, 1.0);",
 	"    texCoord = texcoord;",
 	"}",
@@ -338,9 +337,9 @@ const GLchar *geoSrc[] = {
 	"varying out vec2 fragTexCoord;",
 	"void main() {",
 	"    bool f = true;",
-	"    if (abs(original[0].z - original[1].z) > 0.3 || ",
-	"        abs(original[1].z - original[2].z) > 0.3 || ",
-	"        abs(original[2].z - original[0].z) > 0.3) {",
+	"    if (abs(original[0].z - original[1].z) > 60.0 || ",
+	"        abs(original[1].z - original[2].z) > 60.0 || ",
+	"        abs(original[2].z - original[0].z) > 60.0) {",
 	"        f = false;",
 	"    }",
 	"    gl_Position = gl_PositionIn[0];",

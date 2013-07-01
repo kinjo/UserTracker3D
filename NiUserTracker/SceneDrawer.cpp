@@ -72,7 +72,9 @@ unsigned int getClosestPowerOfTwo(unsigned int n)
 GLfloat vertices[VERTN * VERTN * 3];
 GLfloat tex_coords[VERTN * VERTN * 2];
 GLuint indices[VERTN * (VERTN - 1) * 2];
-void initPlane(float texXpos, float texYpos, GLfloat texcoords[])
+GLfloat texcoords[8];
+GLuint buffer[2];
+void initPlane(float topLeftX, float topLeftY, float bottomRightX, float bottomRightY)
 {
 	int i, j, k, l;
 	GLfloat *v;
@@ -81,10 +83,11 @@ void initPlane(float texXpos, float texYpos, GLfloat texcoords[])
 	for (j = 0; j < VERTN; j++) {
 		for (i = 0; i < VERTN; i++) {
 			v = &vertices[(j * VERTN + i) * 3];
-			v[0] = SIZ / (float)VERTN * (float)i - SIZ / 2.0;
-			v[1] = SIZ / (float)VERTN * (float)j - SIZ / 2.0;
+			v[0] = (float)topLeftX + (float)(bottomRightX - topLeftX) / (float)VERTN * (float)i
+				+ (float)(bottomRightX - topLeftX) / 2.0f;
+			v[1] = (float)topLeftY + (float)(bottomRightY - topLeftY) / (float)VERTN * (float)j
+				+ (float)(bottomRightY - topLeftY) / 2.0f;
 			v[2] = 0.0f;
-			//}
 		}
 	}
 	// init indices
@@ -99,10 +102,24 @@ void initPlane(float texXpos, float texYpos, GLfloat texcoords[])
 	for (j = 0; j < VERTN; j++) {
 		for (i = 0; i < VERTN; i++) {
 			v = &tex_coords[(j * VERTN + i) * 2];
-			v[0] =  (texcoords[0] / (float)VERTN * (float)i);
-			v[1] =  (texcoords[1] / (float)VERTN * (float)j);
+			v[0] =  texcoords[0] - (texcoords[0] / (float)VERTN * (float)i);
+			v[1] =  texcoords[1] - (texcoords[1] / (float)VERTN * (float)j);
 		}
 	}
+
+	glGenBuffers(3, buffer);
+
+	// indices
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer[1]);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+	glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+	// tex_coords
+	glBindBuffer(GL_ARRAY_BUFFER, buffer[2]);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(tex_coords), tex_coords, GL_STATIC_DRAW);
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 GLuint initTexture(void** buf, int& width, int& height)
 {
@@ -120,7 +137,6 @@ GLuint initTexture(void** buf, int& width, int& height)
 	return texID;
 }
 
-GLfloat texcoords[8];
 void DrawRectangle(float topLeftX, float topLeftY, float bottomRightX, float bottomRightY)
 {
 	GLfloat verts[8] = {	topLeftX, topLeftY,
@@ -135,10 +151,15 @@ void DrawRectangle(float topLeftX, float topLeftY, float bottomRightX, float bot
 	glFlush();
 }
 extern GLuint gl2Program;
-GLuint buffer[2];
 extern GLfloat rotX, rotY;
 void DrawTexture(float topLeftX, float topLeftY, float bottomRightX, float bottomRightY)
 {
+	static bool bInitialized = false;	
+	if (!bInitialized) {
+		initPlane(topLeftX, topLeftY, bottomRightX, bottomRightY);
+		bInitialized = true;
+	}
+
 	glBindBuffer(GL_ARRAY_BUFFER, buffer[0]);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 	glUnmapBuffer(GL_ARRAY_BUFFER);
@@ -232,9 +253,13 @@ bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 	pt[1] = joint2.position;
 
 	g_DepthGenerator.ConvertRealWorldToProjective(2, pt, pt);
+#define ADJUST_LIMB_Z_RATIO 2.0f
+#define ADJUST_LIMB_Z 400.0f
+#define STATIC_DMD_W 640
+#define STATIC_DMD_H 480
 #ifndef USE_GLES
-	glVertex3f(pt[0].X/120.0f - 2.5f, pt[0].Y/120.0f - 2.2f, pt[0].Z/160.0f - 8.0f);
-	glVertex3f(pt[1].X/120.0f - 2.5f, pt[1].Y/120.0f - 2.2f, pt[1].Z/160.0f - 8.0f);
+	glVertex3i(pt[0].X - STATIC_DMD_W / 2, pt[0].Y - STATIC_DMD_H / 2, pt[0].Z / ADJUST_LIMB_Z_RATIO - ADJUST_LIMB_Z);
+	glVertex3i(pt[1].X - STATIC_DMD_W / 2, pt[1].Y - STATIC_DMD_H / 2, pt[1].Z / ADJUST_LIMB_Z_RATIO - ADJUST_LIMB_Z);
 #else
 	GLfloat verts[4] = {pt[0].X, pt[0].Y, pt[1].X, pt[1].Y};
 	glVertexPointer(2, GL_FLOAT, 0, verts);
@@ -333,17 +358,7 @@ const XnChar* GetPoseErrorString(XnPoseDetectionStatus error)
 	}
 }
 
-#define ADJUST_PLANE_DEPTH 190.0
-void setPlaneDepth(XnUInt16 nX, XnUInt16 nY, XnUInt32 w, XnUInt32 h, const XnDepthPixel* p)
-{
-	GLfloat *v;
-	if (nY % (h / VERTN) == 0) {
-		if (nX % (w / VERTN) == 0) {
-			v = &vertices[(nY / (h / VERTN) * VERTN + nX / (w / VERTN)) * 3];
-			v[2] = (float)*p / ADJUST_PLANE_DEPTH;
-		}
-	}
-}
+#define ADJUST_PLANE_DEPTH 2.0f
 void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 {
 	static bool bInitialized = false;	
@@ -378,22 +393,6 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 
 		memset(texcoords, 0, 8*sizeof(float));
 		texcoords[0] = texXpos, texcoords[1] = texYpos, texcoords[2] = texXpos, texcoords[7] = texYpos;
-
-		initPlane(texXpos, texYpos, texcoords);
-
-		glGenBuffers(3, buffer);
-
-		// indices
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer[1]);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-		glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-		// tex_coords
-		glBindBuffer(GL_ARRAY_BUFFER, buffer[2]);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(tex_coords), tex_coords, GL_STATIC_DRAW);
-		glUnmapBuffer(GL_ARRAY_BUFFER);
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
 	unsigned int nValue = 0;
@@ -423,8 +422,8 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 
 			GLfloat *v;
 			v = &vertices[
-				((int)((float)nY / (float)g_nYRes * (float)VERTN) * VERTN +
-					(int)((float)nX / (float)g_nXRes * (float)VERTN)) * 3];
+				((int)((float)(g_nYRes - nY - 1)/ (float)g_nYRes * (float)VERTN) * VERTN +
+					(int)((float)(g_nXRes - nX - 1) / (float)g_nXRes * (float)VERTN)) * 3];
 			v[2] = (float)nValue / ADJUST_PLANE_DEPTH;
 
 			if (nValue != 0)
