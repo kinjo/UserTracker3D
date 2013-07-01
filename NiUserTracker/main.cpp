@@ -208,6 +208,14 @@ void LoadCalibration()
 	}
 }
 
+int win_siz_w = GL_WIN_SIZE_X, win_siz_h = GL_WIN_SIZE_Y;
+
+void resize(int w, int h)
+{
+	win_siz_w = w;
+	win_siz_h = h;
+}
+
 GLfloat tranZ;
 // this function is called each frame
 void glutDisplay (void)
@@ -224,10 +232,8 @@ void glutDisplay (void)
 	xn::DepthMetaData depthMD;
 	g_DepthGenerator.GetMetaData(depthMD);
 #ifndef USE_GLES
+	glViewport( 0, 0, win_siz_w, win_siz_h );
 	gluPerspective(30.0, (float)depthMD.XRes()/(float)depthMD.YRes(), 1.0, 5000.0);
-
-	glViewport( 0, 0, GL_WIN_SIZE_X, GL_WIN_SIZE_Y );
-
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	gluLookAt( 
@@ -478,6 +484,7 @@ void glInit (int * pargc, char ** argv)
 	glutIdleFunc(glutIdle);
 	glutMotionFunc(dragMotion);
 	glutPassiveMotionFunc(mouseMotion);
+	glutReshapeFunc(resize);
 
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_TEXTURE_2D);
