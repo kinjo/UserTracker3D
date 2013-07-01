@@ -158,6 +158,7 @@ void DrawRectangle(float topLeftX, float topLeftY, float bottomRightX, float bot
 }
 extern GLuint gl2Program;
 extern GLfloat rotX, rotY;
+extern GLfloat tranZ;
 void DrawTexture(float topLeftX, float topLeftY, float bottomRightX, float bottomRightY)
 {
 	static bool bInitialized = false;	
@@ -231,20 +232,37 @@ void glPrintString(void *font, char *str)
 	}
 }
 #endif
-float normm(float vec[]) {
-	return sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+
+float norm(float v[]) {
+	return sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
-float innert_product(float vec0[], float vec1[]) {
-	return vec0[0] * vec1[0] + vec0[1] * vec1[1] + vec0[2] * vec1[2];
+
+float innerProduct(float v1[], float v2[]) {
+	return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
 }
-void product(float vec[], float vec0[], float vec1[]) {
-	vec[0] = vec0[0] * vec1[0];
-	vec[1] = vec0[1] * vec1[1];
-	vec[2] = vec0[2] * vec1[2];
+
+float vectorAngle(float v1[], float v2[])
+{
+	return acos(innerProduct(v1, v2) / (norm(v1) * norm(v2)));
 }
-float to_deg(float r) {
-	return r * 180.0 / (atan(1.0) * 4.0);
+
+void outerProduct(float v0[], float v1[], float v2[])
+{
+	v0[0] = v1[1] * v2[2] - v1[2] * v2[1]; 
+	v0[1] = v1[2] * v2[0] - v1[0] * v2[2]; 
+	v0[2] = v1[0] * v2[1] - v1[1] * v2[0];
 }
+
+void mulVector(float v0[], float v1[], float v2[]) {
+	v0[0] = v1[0] * v2[0];
+	v0[1] = v1[1] * v2[1];
+	v0[2] = v1[2] * v2[2];
+}
+
+float toDegree(float rad) {
+	return rad * 180.0 / (atan(1.0) * 4.0);
+}
+
 #define CMD_UPDATEVEC 1
 bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 {
@@ -323,14 +341,15 @@ bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 					};
 					// base vector
 					float vec1[] = {0, 0, -1};
-					float f[] = {1, 0, 1}, fvec0[3], fvec1[3];
+					float f[] = {1, 0, 1}, v1[3], v2[3];
 
-					product(fvec0, vec0, f);
-					product(fvec1, vec1, f);
+					mulVector(v1, vec0, f);
+					mulVector(v2, vec1, f);
 
-					float direction = acos(innert_product(fvec0, fvec1) / (normm(fvec0) * normm(fvec1)));
+					float direction = vectorAngle(v1, v2);
 					direction *= vec0[0] < 0 ? -1 : 1;
 					direction = direction < 0 ? 2 * M_PI + direction : direction;
+
 					// get direction and set to sending vector
 					v[4] = direction;
 					v[5] = 0;
@@ -482,6 +501,49 @@ const XnChar* GetPoseErrorString(XnPoseDetectionStatus error)
 	}
 }
 
+void subVector(float v0[], float v1[], float v2[])
+{
+	v0[0] = v1[0] - v2[0];
+	v0[1] = v1[1] - v2[1];
+	v0[2] = v1[2] - v2[2];
+}
+
+void jointToVector(float v0[], XnSkeletonJointPosition joint)
+{
+	v0[0] = joint.position.X;
+	v0[1] = joint.position.Y;
+	v0[2] = joint.position.Z;
+}
+
+void twoJointToVector(float v0[], XnUserID *user, XnSkeletonJoint j0, XnSkeletonJoint j1)
+{
+	float v1[3], v2[3];
+	XnSkeletonJointPosition p0, p1;
+	g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(*user, j0, p0);
+	g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(*user, j1, p1);
+	jointToVector(v1, p0);
+	jointToVector(v2, p1);
+	subVector(v0, v1, v2);
+}
+
+float fourJointsAngle(XnUserID *user, XnSkeletonJoint j0, XnSkeletonJoint j1, XnSkeletonJoint j2, XnSkeletonJoint j3)
+{
+	float v1[3], v2[3];
+	twoJointToVector(v1, user, j0, j1);
+	twoJointToVector(v2, user, j2, j3);
+	return vectorAngle(v1, v2);
+}
+
+void fourJointsOuterProduct(float v0[], XnUserID *user, XnSkeletonJoint j0, XnSkeletonJoint j1, XnSkeletonJoint j2, XnSkeletonJoint j3)
+{
+	float v1[3], v2[3];
+	twoJointToVector(v1, user, j0, j1);
+	twoJointToVector(v2, user, j2, j3);
+	outerProduct(v0, v2, v1);
+}
+
+extern GLfloat rotX, rotY;
+
 #define ADJUST_PLANE_DEPTH 2.0f
 void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 {
@@ -502,10 +564,8 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 		texWidth =  getClosestPowerOfTwo(dmd.XRes());
 		texHeight = getClosestPowerOfTwo(dmd.YRes());
 
-//		printf("Initializing depth texture: width = %d, height = %d\n", texWidth, texHeight);
 		depthTexID = initTexture((void**)&pDepthTexBuf,texWidth, texHeight) ;
 
-//		printf("Initialized depth texture: width = %d, height = %d\n", texWidth, texHeight);
 		bInitialized = true;
 
 		topLeftX = dmd.XRes();
@@ -718,6 +778,49 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 #ifndef USE_GLES
 				glBegin(GL_LINES);
 #endif
+
+				{
+					float d0, d1, d2, d3;
+					XnSkeletonJointPosition j0, j1;
+
+					d0 = fourJointsAngle(&aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_RIGHT_ELBOW,
+								XN_SKEL_RIGHT_HAND, XN_SKEL_RIGHT_ELBOW);
+					d1 = fourJointsAngle(&aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_RIGHT_SHOULDER,
+								XN_SKEL_RIGHT_ELBOW, XN_SKEL_RIGHT_SHOULDER);
+
+					d2 = fourJointsAngle(&aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_LEFT_ELBOW,
+								XN_SKEL_LEFT_HAND, XN_SKEL_LEFT_ELBOW);
+					d3 = fourJointsAngle(&aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_LEFT_SHOULDER,
+								XN_SKEL_LEFT_ELBOW, XN_SKEL_LEFT_SHOULDER);
+
+					if (d0 > 2.2 && d1 > 2.7) {
+						if (d2 > 2.2 && d3 > 2.7) {
+							tranZ += 8.3f;
+						} else {
+							rotY += 1.3f;
+							if (rotY > 360.0f) rotY = 0.0f;
+							if (rotY < 0.0f) rotY = 360.0f;
+						}
+					} else if (d2 > 2.2 && d3 > 2.7) {
+						rotY -= 1.3f;
+						if (rotY > 360.0f) rotY = 0.0f;
+						if (rotY < 0.0f) rotY = 360.0f;
+					}
+
+					if (d0 > 2.2 && d1 < 2.4 && d2 > 2.2 && d3 < 2.4) {
+						float q0[3], q1[3], q2[3];
+						fourJointsOuterProduct(q0, &aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_LEFT_SHOULDER,
+							XN_SKEL_LEFT_HIP, XN_SKEL_LEFT_SHOULDER);
+						twoJointToVector(q1, &aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_LEFT_HAND);
+						twoJointToVector(q2, &aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_RIGHT_HAND);
+						float e0 = vectorAngle(q0, q1);
+						float e1 = vectorAngle(q1, q2);
+						if (e0 < 0.6 && e1 < 0.6) {
+							tranZ -= 8.3f;
+						}
+					}
+
+				}
 
 				// Draw Limbs
 				DrawLimb(aUsers[i], XN_SKEL_HEAD, XN_SKEL_NECK);
