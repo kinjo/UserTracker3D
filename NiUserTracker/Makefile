@@ -1,5 +1,7 @@
 include ../Build/Common/CommonDefs.mak
 
+CFG = Debug
+
 BIN_DIR = ../Bin
 
 INC_DIRS = ../../Include =/usr/include/ni
@@ -10,7 +12,7 @@ EXE_NAME = Sample-NiUserTracker
 
 ifeq "$(GLUT_SUPPORTED)" "1"
 	ifeq ("$(OSTYPE)","Darwin")
-		LDFLAGS += -framework OpenGL -framework GLUT
+		LDFLAGS += -framework OpenGL -framework GLUT -l glew
 	else
 		USED_LIBS += glut GL
 	endif

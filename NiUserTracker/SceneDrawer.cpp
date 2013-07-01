@@ -22,6 +22,8 @@
 //---------------------------------------------------------------------------
 // Includes
 //---------------------------------------------------------------------------
+#include <stdio.h>
+#include <GL/glew.h>
 #include <math.h>
 #include "SceneDrawer.h"
 
@@ -65,6 +67,43 @@ unsigned int getClosestPowerOfTwo(unsigned int n)
 
 	return m;
 }
+#define SIZ 5.0f
+#define VERTN 240
+GLfloat vertices[VERTN * VERTN * 3];
+GLfloat tex_coords[VERTN * VERTN * 2];
+GLuint indices[VERTN * (VERTN - 1) * 2];
+void initPlane(float texXpos, float texYpos, GLfloat texcoords[])
+{
+	int i, j, k, l;
+	GLfloat *v;
+
+	// init vertices
+	for (j = 0; j < VERTN; j++) {
+		for (i = 0; i < VERTN; i++) {
+			v = &vertices[(j * VERTN + i) * 3];
+			v[0] = SIZ / (float)VERTN * (float)i - SIZ / 2.0;
+			v[1] = SIZ / (float)VERTN * (float)j - SIZ / 2.0;
+			v[2] = 0.0f;
+			//}
+		}
+	}
+	// init indices
+	for (j = 0, k = 0; j < VERTN - 1; j++) {
+		for (i = 0; i < VERTN; i++) {
+			l = j % 2 == 0 ? i : VERTN - i - 1;
+			indices[k++] = VERTN * j + l;
+			indices[k++] = VERTN * (j + 1) + l;
+		}
+	}
+	// init tex_coords
+	for (j = 0; j < VERTN; j++) {
+		for (i = 0; i < VERTN; i++) {
+			v = &tex_coords[(j * VERTN + i) * 2];
+			v[0] =  (texcoords[0] / (float)VERTN * (float)i);
+			v[1] =  (texcoords[1] / (float)VERTN * (float)j);
+		}
+	}
+}
 GLuint initTexture(void** buf, int& width, int& height)
 {
 	GLuint texID = 0;
@@ -95,14 +134,48 @@ void DrawRectangle(float topLeftX, float topLeftY, float bottomRightX, float bot
 	//TODO: Maybe glFinish needed here instead - if there's some bad graphics crap
 	glFlush();
 }
+extern GLuint gl2Program;
+GLuint buffer[2];
+extern GLfloat rotX, rotY;
 void DrawTexture(float topLeftX, float topLeftY, float bottomRightX, float bottomRightY)
 {
-	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-	glTexCoordPointer(2, GL_FLOAT, 0, texcoords);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer[0]);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-	DrawRectangle(topLeftX, topLeftY, bottomRightX, bottomRightY);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+	glUseProgram(gl2Program);
 
-	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glPushMatrix();
+	{
+		glRotatef(rotY, 0.0, 1.0, 0.0);
+		glRotatef(rotX, 1.0, 0.0, 0.0);
+
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+
+		glBindBuffer(GL_ARRAY_BUFFER, buffer[0]);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glBindBuffer(GL_ARRAY_BUFFER, buffer[2]);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer[1]);
+		glDrawElements(GL_TRIANGLE_STRIP, sizeof(indices)/sizeof(GLuint), GL_UNSIGNED_INT, 0);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
+	}
+	glPopMatrix();
+	glUseProgram(0);
+
+	glDisable(GL_DEPTH_TEST);
+	glFlush();
 }
 
 XnFloat Colors[][3] =
@@ -160,8 +233,8 @@ bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 
 	g_DepthGenerator.ConvertRealWorldToProjective(2, pt, pt);
 #ifndef USE_GLES
-	glVertex3i(pt[0].X, pt[0].Y, 0);
-	glVertex3i(pt[1].X, pt[1].Y, 0);
+	glVertex3f(pt[0].X/120.0f - 2.5f, pt[0].Y/120.0f - 2.2f, pt[0].Z/160.0f - 8.0f);
+	glVertex3f(pt[1].X/120.0f - 2.5f, pt[1].Y/120.0f - 2.2f, pt[1].Z/160.0f - 8.0f);
 #else
 	GLfloat verts[4] = {pt[0].X, pt[0].Y, pt[1].X, pt[1].Y};
 	glVertexPointer(2, GL_FLOAT, 0, verts);
@@ -260,7 +333,17 @@ const XnChar* GetPoseErrorString(XnPoseDetectionStatus error)
 	}
 }
 
-
+#define ADJUST_PLANE_DEPTH 190.0
+void setPlaneDepth(XnUInt16 nX, XnUInt16 nY, XnUInt32 w, XnUInt32 h, const XnDepthPixel* p)
+{
+	GLfloat *v;
+	if (nY % (h / VERTN) == 0) {
+		if (nX % (w / VERTN) == 0) {
+			v = &vertices[(nY / (h / VERTN) * VERTN + nX / (w / VERTN)) * 3];
+			v[2] = (float)*p / ADJUST_PLANE_DEPTH;
+		}
+	}
+}
 void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 {
 	static bool bInitialized = false;	
@@ -295,6 +378,22 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 
 		memset(texcoords, 0, 8*sizeof(float));
 		texcoords[0] = texXpos, texcoords[1] = texYpos, texcoords[2] = texXpos, texcoords[7] = texYpos;
+
+		initPlane(texXpos, texYpos, texcoords);
+
+		glGenBuffers(3, buffer);
+
+		// indices
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer[1]);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+		glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+		// tex_coords
+		glBindBuffer(GL_ARRAY_BUFFER, buffer[2]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(tex_coords), tex_coords, GL_STATIC_DRAW);
+		glUnmapBuffer(GL_ARRAY_BUFFER);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
 	unsigned int nValue = 0;
@@ -321,6 +420,12 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 		for (nX=0; nX<g_nXRes; nX++)
 		{
 			nValue = *pDepth;
+
+			GLfloat *v;
+			v = &vertices[
+				((int)((float)nY / (float)g_nYRes * (float)VERTN) * VERTN +
+					(int)((float)nX / (float)g_nXRes * (float)VERTN)) * 3];
+			v[2] = (float)nValue / ADJUST_PLANE_DEPTH;
 
 			if (nValue != 0)
 			{
@@ -400,137 +505,144 @@ void DrawDepthMap(const xn::DepthMetaData& dmd, const xn::SceneMetaData& smd)
 	DrawTexture(dmd.XRes(),dmd.YRes(),0,0);	
 	glDisable(GL_TEXTURE_2D);
 
-	char strLabel[50] = "";
-	XnUserID aUsers[15];
-	XnUInt16 nUsers = 15;
-	g_UserGenerator.GetUsers(aUsers, nUsers);
-	for (int i = 0; i < nUsers; ++i)
+	glPushMatrix();
 	{
-#ifndef USE_GLES
-		if (g_bPrintID)
+		glRotatef(rotY, 0.0, 1.0, 0.0);
+		glRotatef(rotX, 1.0, 0.0, 0.0);
+
+		char strLabel[50] = "";
+		XnUserID aUsers[15];
+		XnUInt16 nUsers = 15;
+		g_UserGenerator.GetUsers(aUsers, nUsers);
+		for (int i = 0; i < nUsers; ++i)
 		{
-			XnPoint3D com;
-			g_UserGenerator.GetCoM(aUsers[i], com);
-			g_DepthGenerator.ConvertRealWorldToProjective(1, &com, &com);
-
-			XnUInt32 nDummy = 0;
-
-			xnOSMemSet(strLabel, 0, sizeof(strLabel));
-			if (!g_bPrintState)
+#ifndef USE_GLES
+			if (g_bPrintID)
 			{
-				// Tracking
-				xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d", aUsers[i]);
-			}
-			else if (g_UserGenerator.GetSkeletonCap().IsTracking(aUsers[i]))
-			{
-				// Tracking
-				xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Tracking", aUsers[i]);
-			}
-			else if (g_UserGenerator.GetSkeletonCap().IsCalibrating(aUsers[i]))
-			{
-				// Calibrating
-				xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Calibrating [%s]", aUsers[i], GetCalibrationErrorString(m_Errors[aUsers[i]].first));
-			}
-			else
-			{
-				// Nothing
-				xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Looking for pose [%s]", aUsers[i], GetPoseErrorString(m_Errors[aUsers[i]].second));
-			}
+				XnPoint3D com;
+				g_UserGenerator.GetCoM(aUsers[i], com);
+				g_DepthGenerator.ConvertRealWorldToProjective(1, &com, &com);
+
+				XnUInt32 nDummy = 0;
+
+				xnOSMemSet(strLabel, 0, sizeof(strLabel));
+				if (!g_bPrintState)
+				{
+					// Tracking
+					xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d", aUsers[i]);
+				}
+				else if (g_UserGenerator.GetSkeletonCap().IsTracking(aUsers[i]))
+				{
+					// Tracking
+					xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Tracking", aUsers[i]);
+				}
+				else if (g_UserGenerator.GetSkeletonCap().IsCalibrating(aUsers[i]))
+				{
+					// Calibrating
+					xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Calibrating [%s]", aUsers[i], GetCalibrationErrorString(m_Errors[aUsers[i]].first));
+				}
+				else
+				{
+					// Nothing
+					xnOSStrFormat(strLabel, sizeof(strLabel), &nDummy, "%d - Looking for pose [%s]", aUsers[i], GetPoseErrorString(m_Errors[aUsers[i]].second));
+				}
 
 
-			glColor4f(1-Colors[i%nColors][0], 1-Colors[i%nColors][1], 1-Colors[i%nColors][2], 1);
+				glColor4f(1-Colors[i%nColors][0], 1-Colors[i%nColors][1], 1-Colors[i%nColors][2], 1);
 
-			glRasterPos2i(com.X, com.Y);
-			glPrintString(GLUT_BITMAP_HELVETICA_18, strLabel);
-		}
+				glRasterPos2i(com.X, com.Y);
+				glPrintString(GLUT_BITMAP_HELVETICA_18, strLabel);
+			}
 #endif
-		if (g_bDrawSkeleton && g_UserGenerator.GetSkeletonCap().IsTracking(aUsers[i]))
-		{
-			glColor4f(1-Colors[aUsers[i]%nColors][0], 1-Colors[aUsers[i]%nColors][1], 1-Colors[aUsers[i]%nColors][2], 1);
-
-			// Draw Joints
-			if (g_bMarkJoints)
+			if (g_bDrawSkeleton && g_UserGenerator.GetSkeletonCap().IsTracking(aUsers[i]))
 			{
-				// Try to draw all joints
-				DrawJoint(aUsers[i], XN_SKEL_HEAD);
-				DrawJoint(aUsers[i], XN_SKEL_NECK);
-				DrawJoint(aUsers[i], XN_SKEL_TORSO);
-				DrawJoint(aUsers[i], XN_SKEL_WAIST);
+				glColor4f(1-Colors[aUsers[i]%nColors][0], 1-Colors[aUsers[i]%nColors][1], 1-Colors[aUsers[i]%nColors][2], 1);
 
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_COLLAR);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_SHOULDER);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_ELBOW);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_WRIST);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_HAND);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_FINGERTIP);
+				// Draw Joints
+				if (g_bMarkJoints)
+				{
+					// Try to draw all joints
+					DrawJoint(aUsers[i], XN_SKEL_HEAD);
+					DrawJoint(aUsers[i], XN_SKEL_NECK);
+					DrawJoint(aUsers[i], XN_SKEL_TORSO);
+					DrawJoint(aUsers[i], XN_SKEL_WAIST);
 
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_COLLAR);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_SHOULDER);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_ELBOW);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_WRIST);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_HAND);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_FINGERTIP);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_COLLAR);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_SHOULDER);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_ELBOW);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_WRIST);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_HAND);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_FINGERTIP);
 
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_HIP);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_KNEE);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_ANKLE);
-				DrawJoint(aUsers[i], XN_SKEL_LEFT_FOOT);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_COLLAR);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_SHOULDER);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_ELBOW);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_WRIST);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_HAND);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_FINGERTIP);
 
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_HIP);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_KNEE);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_ANKLE);
-				DrawJoint(aUsers[i], XN_SKEL_RIGHT_FOOT);
-			}
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_HIP);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_KNEE);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_ANKLE);
+					DrawJoint(aUsers[i], XN_SKEL_LEFT_FOOT);
+
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_HIP);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_KNEE);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_ANKLE);
+					DrawJoint(aUsers[i], XN_SKEL_RIGHT_FOOT);
+				}
 
 #ifndef USE_GLES
-			glBegin(GL_LINES);
+				glBegin(GL_LINES);
 #endif
 
-			// Draw Limbs
-			DrawLimb(aUsers[i], XN_SKEL_HEAD, XN_SKEL_NECK);
+				// Draw Limbs
+				DrawLimb(aUsers[i], XN_SKEL_HEAD, XN_SKEL_NECK);
 
-			DrawLimb(aUsers[i], XN_SKEL_NECK, XN_SKEL_LEFT_SHOULDER);
-			DrawLimb(aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_LEFT_ELBOW);
-			if (!DrawLimb(aUsers[i], XN_SKEL_LEFT_ELBOW, XN_SKEL_LEFT_WRIST))
-			{
-				DrawLimb(aUsers[i], XN_SKEL_LEFT_ELBOW, XN_SKEL_LEFT_HAND);
-			}
-			else
-			{
-				DrawLimb(aUsers[i], XN_SKEL_LEFT_WRIST, XN_SKEL_LEFT_HAND);
-				DrawLimb(aUsers[i], XN_SKEL_LEFT_HAND, XN_SKEL_LEFT_FINGERTIP);
-			}
+				DrawLimb(aUsers[i], XN_SKEL_NECK, XN_SKEL_LEFT_SHOULDER);
+				DrawLimb(aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_LEFT_ELBOW);
+				if (!DrawLimb(aUsers[i], XN_SKEL_LEFT_ELBOW, XN_SKEL_LEFT_WRIST))
+				{
+					DrawLimb(aUsers[i], XN_SKEL_LEFT_ELBOW, XN_SKEL_LEFT_HAND);
+				}
+				else
+				{
+					DrawLimb(aUsers[i], XN_SKEL_LEFT_WRIST, XN_SKEL_LEFT_HAND);
+					DrawLimb(aUsers[i], XN_SKEL_LEFT_HAND, XN_SKEL_LEFT_FINGERTIP);
+				}
 
 
-			DrawLimb(aUsers[i], XN_SKEL_NECK, XN_SKEL_RIGHT_SHOULDER);
-			DrawLimb(aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_RIGHT_ELBOW);
-			if (!DrawLimb(aUsers[i], XN_SKEL_RIGHT_ELBOW, XN_SKEL_RIGHT_WRIST))
-			{
-				DrawLimb(aUsers[i], XN_SKEL_RIGHT_ELBOW, XN_SKEL_RIGHT_HAND);
-			}
-			else
-			{
-				DrawLimb(aUsers[i], XN_SKEL_RIGHT_WRIST, XN_SKEL_RIGHT_HAND);
-				DrawLimb(aUsers[i], XN_SKEL_RIGHT_HAND, XN_SKEL_RIGHT_FINGERTIP);
-			}
+				DrawLimb(aUsers[i], XN_SKEL_NECK, XN_SKEL_RIGHT_SHOULDER);
+				DrawLimb(aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_RIGHT_ELBOW);
+				if (!DrawLimb(aUsers[i], XN_SKEL_RIGHT_ELBOW, XN_SKEL_RIGHT_WRIST))
+				{
+					DrawLimb(aUsers[i], XN_SKEL_RIGHT_ELBOW, XN_SKEL_RIGHT_HAND);
+				}
+				else
+				{
+					DrawLimb(aUsers[i], XN_SKEL_RIGHT_WRIST, XN_SKEL_RIGHT_HAND);
+					DrawLimb(aUsers[i], XN_SKEL_RIGHT_HAND, XN_SKEL_RIGHT_FINGERTIP);
+				}
 
-			DrawLimb(aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_TORSO);
-			DrawLimb(aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_TORSO);
+				DrawLimb(aUsers[i], XN_SKEL_LEFT_SHOULDER, XN_SKEL_TORSO);
+				DrawLimb(aUsers[i], XN_SKEL_RIGHT_SHOULDER, XN_SKEL_TORSO);
 
-			DrawLimb(aUsers[i], XN_SKEL_TORSO, XN_SKEL_LEFT_HIP);
-			DrawLimb(aUsers[i], XN_SKEL_LEFT_HIP, XN_SKEL_LEFT_KNEE);
-			DrawLimb(aUsers[i], XN_SKEL_LEFT_KNEE, XN_SKEL_LEFT_FOOT);
+				DrawLimb(aUsers[i], XN_SKEL_TORSO, XN_SKEL_LEFT_HIP);
+				DrawLimb(aUsers[i], XN_SKEL_LEFT_HIP, XN_SKEL_LEFT_KNEE);
+				DrawLimb(aUsers[i], XN_SKEL_LEFT_KNEE, XN_SKEL_LEFT_FOOT);
 
-			DrawLimb(aUsers[i], XN_SKEL_TORSO, XN_SKEL_RIGHT_HIP);
-			DrawLimb(aUsers[i], XN_SKEL_RIGHT_HIP, XN_SKEL_RIGHT_KNEE);
-			DrawLimb(aUsers[i], XN_SKEL_RIGHT_KNEE, XN_SKEL_RIGHT_FOOT);
+				DrawLimb(aUsers[i], XN_SKEL_TORSO, XN_SKEL_RIGHT_HIP);
+				DrawLimb(aUsers[i], XN_SKEL_RIGHT_HIP, XN_SKEL_RIGHT_KNEE);
+				DrawLimb(aUsers[i], XN_SKEL_RIGHT_KNEE, XN_SKEL_RIGHT_FOOT);
 
-			DrawLimb(aUsers[i], XN_SKEL_LEFT_HIP, XN_SKEL_RIGHT_HIP);
+				DrawLimb(aUsers[i], XN_SKEL_LEFT_HIP, XN_SKEL_RIGHT_HIP);
 #ifndef USE_GLES
-			glEnd();
+				glEnd();
 #endif
+			}
 		}
 	}
+	glPopMatrix();
 
 	if (g_bPrintFrameID)
 	{

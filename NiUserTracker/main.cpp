@@ -22,6 +22,7 @@
 //---------------------------------------------------------------------------
 // Includes
 //---------------------------------------------------------------------------
+#include <GL/glew.h>
 #include <XnOpenNI.h>
 #include <XnCodecIDs.h>
 #include <XnCppWrapper.h>
@@ -200,6 +201,7 @@ void LoadCalibration()
 	}
 }
 
+GLfloat tranZ;
 // this function is called each frame
 void glutDisplay (void)
 {
@@ -215,7 +217,21 @@ void glutDisplay (void)
 	xn::DepthMetaData depthMD;
 	g_DepthGenerator.GetMetaData(depthMD);
 #ifndef USE_GLES
-	glOrtho(0, depthMD.XRes(), depthMD.YRes(), 0, -1.0, 1.0);
+	gluPerspective(30.0, (float)depthMD.XRes()/(float)depthMD.YRes(), 1.0, 1000.0);
+
+	glViewport( 0, 0, depthMD.XRes(), depthMD.YRes() );
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	gluLookAt( 
+		0, 0, -20,
+		//0, 0, -500,
+		0, 0, 0,
+		0, -1, 0
+	);
+	glTranslatef(0.0, 0.0, tranZ);
+
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
 #else
 	glOrthof(0, depthMD.XRes(), depthMD.YRes(), 0, -1.0, 1.0);
 #endif
@@ -294,6 +310,78 @@ void glutKeyboard (unsigned char key, int /*x*/, int /*y*/)
 		break;
 	}
 }
+const GLchar *vertSrc[] = {
+	"attribute vec3 position;",
+	"attribute vec2 texcoord;",
+	"varying vec2 texCoord;",
+	"varying vec3 original;",
+	"void main(void) {",
+	"    vec3 v = position;",
+	"    original = position;",
+	"    v.z -= 7.0;",
+	"    gl_Position = gl_ModelViewProjectionMatrix * vec4(v, 1.0);",
+	"    texCoord = texcoord;",
+	"}",
+};
+
+const GLchar *fragSrc[] = {
+	"uniform sampler2D texture0;",
+	"varying vec2 fragTexCoord;",
+	"void main(void) {",
+	"    gl_FragColor = texture2D(texture0, fragTexCoord);",
+	"}",
+};
+
+const GLchar *geoSrc[] = {
+	"varying in vec3 original[];",
+	"varying in vec2 texCoord[];",
+	"varying out vec2 fragTexCoord;",
+	"void main() {",
+	"    bool f = true;",
+	"    if (abs(original[0].z - original[1].z) > 0.3 || ",
+	"        abs(original[1].z - original[2].z) > 0.3 || ",
+	"        abs(original[2].z - original[0].z) > 0.3) {",
+	"        f = false;",
+	"    }",
+	"    gl_Position = gl_PositionIn[0];",
+	"    fragTexCoord = texCoord[0];",
+	"    if (f && original[0].z > 0.0) EmitVertex();",
+	"    gl_Position = gl_PositionIn[1];",
+	"    fragTexCoord = texCoord[1];",
+	"    if (f && original[1].z > 0.0) EmitVertex();",
+	"    gl_Position = gl_PositionIn[2];",
+	"    fragTexCoord = texCoord[2];",
+	"    if (f && original[2].z > 0.0) EmitVertex();",
+	"    EndPrimitive();",
+	"}",
+};
+
+int oldX, oldY;
+void dragMotion(int x , int y)
+{
+	if (oldY < y) tranZ -= 0.6f;
+	if (oldY > y) tranZ += 0.6f;
+	if (tranZ > 20.0f) tranZ = 20.0f;
+	if (tranZ < -20.0f) tranZ = -20.0f;
+
+	oldX = x; oldY = y;
+}
+GLfloat rotX, rotY;
+void mouseMotion(int x , int y)
+{
+	if (oldX < x) rotY -= 1.6f;
+	if (oldX > x) rotY += 1.6f;
+	if (rotY > 360.0f) rotY = 0.0f;
+	if (rotY < 0.0f) rotY = 360.0f;
+
+	if (oldY < y) rotX -= 1.6f;
+	if (oldY > y) rotX += 1.6f;
+	if (rotX > 360.0f) rotX = 0.0f;
+	if (rotX < 0.0f) rotX = 360.0f;
+
+	oldX = x; oldY = y;
+}
+GLuint gl2Program;
 void glInit (int * pargc, char ** argv)
 {
 	glutInit(pargc, argv);
@@ -303,9 +391,87 @@ void glInit (int * pargc, char ** argv)
 	//glutFullScreen();
 	glutSetCursor(GLUT_CURSOR_NONE);
 
+	// Init shader program
+	{
+		GLuint vertShader, fragShader, geoShader;
+		GLint compiled, linked;
+		GLsizei siz, len;
+		GLchar *buf;
+		GLenum e;
+
+		e = glewInit();
+
+		gl2Program = glCreateProgram();
+
+		vertShader = glCreateShader(GL_VERTEX_SHADER);
+		glShaderSource(vertShader, sizeof(vertSrc) / sizeof(GLchar *), vertSrc, NULL);
+		glCompileShader(vertShader);
+		glGetShaderiv(vertShader, GL_COMPILE_STATUS, &compiled);
+		glGetShaderiv(vertShader, GL_INFO_LOG_LENGTH, &siz);
+		buf = (GLchar *)malloc(siz);
+		glGetShaderInfoLog(vertShader, siz, &len, buf);
+		printf("%s", buf);
+		free(buf);
+		if (compiled == GL_FALSE) {
+			return;
+		}
+		glAttachShader(gl2Program, vertShader);
+		glDeleteShader(vertShader);
+
+		fragShader = glCreateShader(GL_FRAGMENT_SHADER);
+		glShaderSource(fragShader, sizeof(fragSrc) / sizeof(GLchar *), fragSrc, NULL);
+		glCompileShader(fragShader);
+		glGetShaderiv(fragShader, GL_COMPILE_STATUS, &compiled);
+		glGetShaderiv(fragShader, GL_INFO_LOG_LENGTH, &siz);
+		buf = (GLchar *)malloc(siz);
+		glGetShaderInfoLog(fragShader, siz, &len, buf);
+		printf("%s", buf);
+		free(buf);
+		if (compiled == GL_FALSE) {
+			return;
+		}
+		glAttachShader(gl2Program, fragShader);
+		glDeleteShader(fragShader);
+
+		geoShader = glCreateShader(GL_GEOMETRY_SHADER);
+		glShaderSource(geoShader, sizeof(geoSrc) / sizeof(GLchar *), geoSrc, NULL);
+		glCompileShader(geoShader);
+		glGetShaderiv(geoShader, GL_COMPILE_STATUS, &compiled);
+		glGetShaderiv(geoShader, GL_INFO_LOG_LENGTH, &siz);
+		buf = (GLchar *)malloc(siz);
+		glGetShaderInfoLog(geoShader, siz, &len, buf);
+		printf("%s", buf);
+		free(buf);
+		if (compiled == GL_FALSE) {
+			return;
+		}
+		glAttachShader(gl2Program, geoShader);
+		glDeleteShader(geoShader);
+
+		glProgramParameteriEXT(gl2Program, GL_GEOMETRY_INPUT_TYPE_EXT, GL_TRIANGLE_STRIP);
+		glProgramParameteriEXT(gl2Program, GL_GEOMETRY_OUTPUT_TYPE_EXT, GL_TRIANGLE_STRIP);
+		glProgramParameteriEXT(gl2Program, GL_GEOMETRY_VERTICES_OUT_EXT, GL_TRIANGLE_STRIP);
+
+		glBindAttribLocation(gl2Program, 0, "position");
+		glBindAttribLocation(gl2Program, 1, "texcoord");
+		glUniform1i(glGetUniformLocation(gl2Program, "texture0"), 0);
+
+		glLinkProgram(gl2Program);
+		glGetProgramiv(gl2Program, GL_LINK_STATUS, &linked);
+		glGetShaderiv(gl2Program, GL_INFO_LOG_LENGTH, &siz);
+		buf = (GLchar *)malloc(siz);
+		glGetShaderInfoLog(gl2Program, siz, &len, buf);
+		printf("%s", buf);
+		free(buf);
+		if (linked == GL_FALSE) {
+			return;
+		}
+	}
 	glutKeyboardFunc(glutKeyboard);
 	glutDisplayFunc(glutDisplay);
 	glutIdleFunc(glutIdle);
+	glutMotionFunc(dragMotion);
+	glutPassiveMotionFunc(mouseMotion);
 
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_TEXTURE_2D);
