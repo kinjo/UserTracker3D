@@ -505,6 +505,7 @@ fd_set readfds;
 struct timeval timeout;
 float v[4];
 int i, len;
+bool is_connected = false;
 
 int main(int argc, char **argv)
 {
@@ -564,7 +565,9 @@ int main(int argc, char **argv)
 	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
 		perror("connect error");
 		close(fd);
-		return 1;
+		//return 1;
+	} else {
+		is_connected = true;
 	}
 
 	timeout.tv_sec = 0;

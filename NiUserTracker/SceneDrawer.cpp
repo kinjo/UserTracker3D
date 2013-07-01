@@ -53,6 +53,7 @@ extern fd_set readfds;
 extern int fd;
 char wbuf[256];
 extern struct timeval timeout;
+extern bool is_connected;
 
 #include <map>
 std::map<XnUInt32, std::pair<XnCalibrationStatus, XnPoseDetectionStatus> > m_Errors;
@@ -273,7 +274,7 @@ bool DrawLimb(XnUserID player, XnSkeletonJoint eJoint1, XnSkeletonJoint eJoint2)
 	pt[1] = joint2.position;
 
 	if (eJoint2 == XN_SKEL_RIGHT_HAND) {
-		if (fd) {
+		if (is_connected) {
 			XnSkeletonJointPosition head_joint_pos;
 			g_UserGenerator.GetSkeletonCap().GetSkeletonJointPosition(player, XN_SKEL_HEAD, head_joint_pos);
 			XnPoint3D hand_pos = head_joint_pos.position;
