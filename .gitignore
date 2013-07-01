@@ -1,0 +1,5 @@
+*.o
+tags
+*.swp
+/Bin/x64-Release
+/Bin/x64-Debug
