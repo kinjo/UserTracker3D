@@ -18,4 +18,27 @@ Run as follow
     make
     (cd ../Bin/x64-Debug&&./Sample-NiUserTracker)
 
+body gestures
+-------------------
+
+![Alt text](http://dl.dropboxusercontent.com/u/3694324/Images/clockwise-rotation.png)
+
+Clockwise rotation
+
+![Alt text](http://dl.dropboxusercontent.com/u/3694324/Images/counterclockwise-rotation.png)
+
+Counterclockwise rotation
+
+![Alt text](http://dl.dropboxusercontent.com/u/3694324/Images/scale-up.png)
+
+Scale up
+
+![Alt text](http://dl.dropboxusercontent.com/u/3694324/Images/scale-down.png)
+
+Scale down
+
+License
+--------
+
 Follow original license.
+
