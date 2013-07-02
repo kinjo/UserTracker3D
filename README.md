@@ -18,7 +18,7 @@ Run as follow
     make
     (cd ../Bin/x64-Debug&&./Sample-NiUserTracker)
 
-body gestures
+Body gestures
 -------------------
 
 ![Alt text](http://dl.dropboxusercontent.com/u/3694324/Images/clockwise-rotation.png)
